@@ -1,8 +1,11 @@
-import type {Buffer} from 'node:buffer';
-import type {IncomingMessageWithTimings, Timings} from '@szmarczak/http-timer';
-import {RequestError} from './errors.js';
-import type {ParseJsonFunction, ResponseType} from './options.js';
-import type Request from './index.js';
+import type { Buffer } from "node:buffer";
+import type {
+	IncomingMessageWithTimings,
+	Timings,
+} from "@szmarczak/http-timer";
+import { RequestError } from "./errors.js";
+import type { ParseJsonFunction, ResponseType } from "./options.js";
+import type Request from "./index.js";
 
 export type PlainResponse = {
 	/**
@@ -113,10 +116,12 @@ export type Response<T = unknown> = {
 } & PlainResponse;
 
 export const isResponseOk = (response: PlainResponse): boolean => {
-	const {statusCode} = response;
+	const { statusCode } = response;
 	const limitStatusCode = response.request.options.followRedirect ? 299 : 399;
 
-	return (statusCode >= 200 && statusCode <= limitStatusCode) || statusCode === 304;
+	return (
+		(statusCode >= 200 && statusCode <= limitStatusCode) || statusCode === 304
+	);
 };
 
 /**
@@ -127,35 +132,47 @@ export class ParseError extends RequestError {
 	declare readonly response: Response;
 
 	constructor(error: Error, response: Response) {
-		const {options} = response.request;
+		const { options } = response.request;
 
-		super(`${error.message} in "${options.url!.toString()}"`, error, response.request);
-		this.name = 'ParseError';
-		this.code = 'ERR_BODY_PARSE_FAILURE';
+		super(
+			`${error.message} in "${options.url!.toString()}"`,
+			error,
+			response.request
+		);
+		this.name = "ParseError";
+		this.code = "ERR_BODY_PARSE_FAILURE";
 	}
 }
 
-export const parseBody = (response: Response, responseType: ResponseType, parseJson: ParseJsonFunction, encoding?: BufferEncoding): unknown => {
-	const {rawBody} = response;
+export const parseBody = (
+	response: Response,
+	responseType: ResponseType,
+	parseJson: ParseJsonFunction,
+	encoding?: BufferEncoding
+): unknown => {
+	const { rawBody } = response;
 
 	try {
-		if (responseType === 'text') {
+		if (responseType === "text") {
 			return rawBody.toString(encoding);
 		}
 
-		if (responseType === 'json') {
-			return rawBody.length === 0 ? '' : parseJson(rawBody.toString(encoding));
+		if (responseType === "json") {
+			return rawBody.length === 0 ? "" : parseJson(rawBody.toString(encoding));
 		}
 
-		if (responseType === 'buffer') {
+		if (responseType === "buffer") {
 			return rawBody;
 		}
 	} catch (error) {
 		throw new ParseError(error as Error, response);
 	}
 
-	throw new ParseError({
-		message: `Unknown body type '${responseType as string}'`,
-		name: 'Error',
-	}, response);
+	throw new ParseError(
+		{
+			message: `Unknown body type '${responseType as string}'`,
+			name: "Error",
+		},
+		response
+	);
 };

@@ -1,50 +1,65 @@
-import process from 'node:process';
-import type {Buffer} from 'node:buffer';
-import {promisify, inspect} from 'node:util';
-import {checkServerIdentity} from 'node:tls';
+import process from "node:process";
+import type { Buffer } from "node:buffer";
+import { promisify, inspect } from "node:util";
+import { checkServerIdentity } from "node:tls";
 // DO NOT use destructuring for `https.request` and `http.request` as it's not compatible with `nock`.
-import http from 'node:http';
-import https from 'node:https';
-import type {Readable} from 'node:stream';
-import type {Socket} from 'node:net';
-import type {SecureContextOptions, DetailedPeerCertificate} from 'node:tls';
-import type {
-	Agent as HttpAgent,
-	ClientRequest,
-} from 'node:http';
+import http from "node:http";
+import https from "node:https";
+import type { Readable } from "node:stream";
+import type { Socket } from "node:net";
+import type { SecureContextOptions, DetailedPeerCertificate } from "node:tls";
+import type { Agent as HttpAgent, ClientRequest } from "node:http";
 import type {
 	RequestOptions as HttpsRequestOptions,
 	Agent as HttpsAgent,
-} from 'node:https';
-import type {InspectOptions} from 'node:util';
-import is, {assert} from '@sindresorhus/is';
-import lowercaseKeys from 'lowercase-keys';
-import CacheableLookup from 'cacheable-lookup';
-import http2wrapper, {type ClientHttp2Session} from 'http2-wrapper';
-import {isFormData} from 'form-data-encoder';
-import type {FormDataLike} from 'form-data-encoder';
-import type {StorageAdapter} from 'cacheable-request';
-import type ResponseLike from 'responselike';
-import type {IncomingMessageWithTimings} from '@szmarczak/http-timer';
-import type {CancelableRequest} from '../as-promise/types.js';
-import parseLinkHeader from './parse-link-header.js';
-import type {PlainResponse, Response} from './response.js';
-import type {RequestError} from './errors.js';
-import type {Delays} from './timed-out.js';
+} from "node:https";
+import type { InspectOptions } from "node:util";
+import is, { assert } from "@sindresorhus/is";
+import lowercaseKeys from "lowercase-keys";
+import CacheableLookup from "cacheable-lookup";
+import http2wrapper, {
+	IncomingMessage,
+	type ClientHttp2Session,
+} from "http2-wrapper";
+import { isFormData } from "form-data-encoder";
+import type { FormDataLike } from "form-data-encoder";
+import type { StorageAdapter } from "cacheable-request";
+import type ResponseLike from "responselike";
+import type { IncomingMessageWithTimings } from "@szmarczak/http-timer";
+import type { CancelableRequest } from "../as-promise/types.js";
+import parseLinkHeader from "./parse-link-header.js";
+import type { PlainResponse, Response } from "./response.js";
+import type { RequestError } from "./errors.js";
+import type { Delays } from "./timed-out.js";
+import CachePolicy from "http-cache-semantics";
 
 type Promisable<T> = T | Promise<T>;
 
-const [major, minor] = process.versions.node.split('.').map(Number) as [number, number, number];
+const [major, minor] = process.versions.node.split(".").map(Number) as [
+	number,
+	number,
+	number
+];
 
 export type DnsLookupIpVersion = undefined | 4 | 6;
 
-type Except<ObjectType, KeysType extends keyof ObjectType> = Pick<ObjectType, Exclude<keyof ObjectType, KeysType>>;
+type Except<ObjectType, KeysType extends keyof ObjectType> = Pick<
+	ObjectType,
+	Exclude<keyof ObjectType, KeysType>
+>;
 
-export type NativeRequestOptions = HttpsRequestOptions & CacheOptions & {checkServerIdentity?: CheckServerIdentityFunction};
+export type NativeRequestOptions = HttpsRequestOptions &
+	CacheOptions & { checkServerIdentity?: CheckServerIdentityFunction };
 
 type AcceptableResponse = IncomingMessageWithTimings | ResponseLike;
-type AcceptableRequestResult = Promisable<AcceptableResponse | ClientRequest> | undefined;
-export type RequestFunction = (url: URL, options: NativeRequestOptions, callback?: (response: AcceptableResponse) => void) => AcceptableRequestResult;
+type AcceptableRequestResult =
+	| Promisable<AcceptableResponse | ClientRequest>
+	| undefined;
+export type RequestFunction = (
+	url: URL,
+	options: NativeRequestOptions,
+	callback?: (response: AcceptableResponse) => void
+) => AcceptableRequestResult;
 
 export type Agents = {
 	http?: HttpAgent | false;
@@ -55,10 +70,26 @@ export type Agents = {
 export type Headers = Record<string, string | string[] | undefined>;
 
 export type ToughCookieJar = {
-	getCookieString: ((currentUrl: string, options: Record<string, unknown>, cb: (error: Error | null, cookies: string) => void) => void) // eslint-disable-line @typescript-eslint/ban-types
-	& ((url: string, callback: (error: Error | null, cookieHeader: string) => void) => void); // eslint-disable-line @typescript-eslint/ban-types
-	setCookie: ((cookieOrString: unknown, currentUrl: string, options: Record<string, unknown>, cb: (error: Error | null, cookie: unknown) => void) => void) // eslint-disable-line @typescript-eslint/ban-types
-	& ((rawCookie: string, url: string, callback: (error: Error | null, result: unknown) => void) => void); // eslint-disable-line @typescript-eslint/ban-types
+	getCookieString: ((
+		currentUrl: string,
+		options: Record<string, unknown>,
+		cb: (error: Error | null, cookies: string) => void
+	) => void) & // eslint-disable-line @typescript-eslint/ban-types
+		((
+			url: string,
+			callback: (error: Error | null, cookieHeader: string) => void
+		) => void); // eslint-disable-line @typescript-eslint/ban-types
+	setCookie: ((
+		cookieOrString: unknown,
+		currentUrl: string,
+		options: Record<string, unknown>,
+		cb: (error: Error | null, cookie: unknown) => void
+	) => void) & // eslint-disable-line @typescript-eslint/ban-types
+		((
+			rawCookie: string,
+			url: string,
+			callback: (error: Error | null, result: unknown) => void
+		) => void); // eslint-disable-line @typescript-eslint/ban-types
 };
 
 export type PromiseCookieJar = {
@@ -67,11 +98,26 @@ export type PromiseCookieJar = {
 };
 
 export type InitHook = (init: OptionsInit, self: Options) => void;
-export type BeforeRequestHook = (options: Options) => Promisable<void | Response | ResponseLike>;
-export type BeforeRedirectHook = (updatedOptions: Options, plainResponse: PlainResponse) => Promisable<void>;
+export type BeforeRequestHook = (
+	options: Options
+) => Promisable<void | Response | ResponseLike>;
+export type BeforeRedirectHook = (
+	updatedOptions: Options,
+	plainResponse: PlainResponse
+) => Promisable<void>;
 export type BeforeErrorHook = (error: RequestError) => Promisable<RequestError>;
-export type BeforeRetryHook = (error: RequestError, retryCount: number) => Promisable<void>;
-export type AfterResponseHook<ResponseType = unknown> = (response: Response<ResponseType>, retryWithMergedOptions: (options: OptionsInit) => never) => Promisable<Response | CancelableRequest<Response>>;
+export type BeforeRetryHook = (
+	error: RequestError,
+	retryCount: number
+) => Promisable<void>;
+export type BeforeCacheHook = (
+	response: IncomingMessage,
+	policy: CachePolicy
+) => Promisable<boolean | undefined | void>;
+export type AfterResponseHook<ResponseType = unknown> = (
+	response: Response<ResponseType>,
+	retryWithMergedOptions: (options: OptionsInit) => never
+) => Promisable<Response | CancelableRequest<Response>>;
 
 /**
 All available hooks of Got.
@@ -299,6 +345,11 @@ export type Hooks = {
 	beforeRetry: BeforeRetryHook[];
 
 	/**
+	Runs before a response object is handed through to the caching request handler.
+	*/
+	beforeCache: BeforeCacheHook[];
+
+	/**
 	Each function should return the response. This is especially useful when you want to refresh an access token.
 
 	@default []
@@ -358,22 +409,22 @@ export type StringifyJsonFunction = (object: unknown) => string;
 All available HTTP request methods provided by Got.
 */
 export type Method =
-	| 'GET'
-	| 'POST'
-	| 'PUT'
-	| 'PATCH'
-	| 'HEAD'
-	| 'DELETE'
-	| 'OPTIONS'
-	| 'TRACE'
-	| 'get'
-	| 'post'
-	| 'put'
-	| 'patch'
-	| 'head'
-	| 'delete'
-	| 'options'
-	| 'trace';
+	| "GET"
+	| "POST"
+	| "PUT"
+	| "PATCH"
+	| "HEAD"
+	| "DELETE"
+	| "OPTIONS"
+	| "TRACE"
+	| "get"
+	| "post"
+	| "put"
+	| "patch"
+	| "head"
+	| "delete"
+	| "options"
+	| "trace";
 
 export type RetryObject = {
 	attemptCount: number;
@@ -418,14 +469,30 @@ export type RetryOptions = {
 	maxRetryAfter?: number;
 };
 
-export type CreateConnectionFunction = (options: NativeRequestOptions, oncreate: (error: NodeJS.ErrnoException, socket: Socket) => void) => Socket;
-export type CheckServerIdentityFunction = (hostname: string, certificate: DetailedPeerCertificate) => NodeJS.ErrnoException | void;
+export type CreateConnectionFunction = (
+	options: NativeRequestOptions,
+	oncreate: (error: NodeJS.ErrnoException, socket: Socket) => void
+) => Socket;
+export type CheckServerIdentityFunction = (
+	hostname: string,
+	certificate: DetailedPeerCertificate
+) => NodeJS.ErrnoException | void;
 
 export type CacheOptions = {
 	shared?: boolean;
 	cacheHeuristic?: number;
 	immutableMinTimeToLive?: number;
 	ignoreCargoCult?: boolean;
+	/**
+	 * Control whether a request should be cached or not.
+	 *
+	 * Return undefined to allow normal caching rules to occur, or a boolean to
+	 * manually override the cache rules.
+	 */
+	cacheRequest?: (
+		policy: CachePolicy,
+		response: IncomingMessage
+	) => boolean | undefined;
 };
 
 type PfxObject = {
@@ -439,7 +506,7 @@ export type HttpsOptions = {
 	alpnProtocols?: string[];
 
 	// From `http.RequestOptions` and `tls.CommonConnectionOptions`
-	rejectUnauthorized?: NativeRequestOptions['rejectUnauthorized'];
+	rejectUnauthorized?: NativeRequestOptions["rejectUnauthorized"];
 
 	// From `tls.ConnectionOptions`
 	checkServerIdentity?: CheckServerIdentityFunction;
@@ -458,7 +525,7 @@ export type HttpsOptions = {
 	});
 	```
 	*/
-	certificateAuthority?: SecureContextOptions['ca'];
+	certificateAuthority?: SecureContextOptions["ca"];
 
 	/**
 	Private keys in [PEM](https://en.wikipedia.org/wiki/Privacy-Enhanced_Mail) format.
@@ -468,7 +535,7 @@ export type HttpsOptions = {
 
 	Multiple keys with different passphrases can be provided as an array of `{pem: <string | Buffer>, passphrase: <string>}`
 	*/
-	key?: SecureContextOptions['key'];
+	key?: SecureContextOptions["key"];
 
 	/**
 	[Certificate chains](https://en.wikipedia.org/wiki/X.509#Certificate_chains_and_cross-certification) in [PEM](https://en.wikipedia.org/wiki/Privacy-Enhanced_Mail) format.
@@ -479,23 +546,23 @@ export type HttpsOptions = {
 
 	If the intermediate certificates are not provided, the peer will not be able to validate the certificate, and the handshake will fail.
 	*/
-	certificate?: SecureContextOptions['cert'];
+	certificate?: SecureContextOptions["cert"];
 
 	/**
 	The passphrase to decrypt the `options.https.key` (if different keys have different passphrases refer to `options.https.key` documentation).
 	*/
-	passphrase?: SecureContextOptions['passphrase'];
+	passphrase?: SecureContextOptions["passphrase"];
 	pfx?: PfxType;
 
-	ciphers?: SecureContextOptions['ciphers'];
-	honorCipherOrder?: SecureContextOptions['honorCipherOrder'];
-	minVersion?: SecureContextOptions['minVersion'];
-	maxVersion?: SecureContextOptions['maxVersion'];
-	signatureAlgorithms?: SecureContextOptions['sigalgs'];
-	tlsSessionLifetime?: SecureContextOptions['sessionTimeout'];
-	dhparam?: SecureContextOptions['dhparam'];
-	ecdhCurve?: SecureContextOptions['ecdhCurve'];
-	certificateRevocationLists?: SecureContextOptions['crl'];
+	ciphers?: SecureContextOptions["ciphers"];
+	honorCipherOrder?: SecureContextOptions["honorCipherOrder"];
+	minVersion?: SecureContextOptions["minVersion"];
+	maxVersion?: SecureContextOptions["maxVersion"];
+	signatureAlgorithms?: SecureContextOptions["sigalgs"];
+	tlsSessionLifetime?: SecureContextOptions["sessionTimeout"];
+	dhparam?: SecureContextOptions["dhparam"];
+	ecdhCurve?: SecureContextOptions["ecdhCurve"];
+	certificateRevocationLists?: SecureContextOptions["crl"];
 };
 
 export type PaginateData<BodyType, ElementType> = {
@@ -520,7 +587,9 @@ export type PaginationOptions<ElementType, BodyType> = {
 
 	@default response => JSON.parse(response.body)
 	*/
-	transform?: (response: Response<BodyType>) => Promise<ElementType[]> | ElementType[];
+	transform?: (
+		response: Response<BodyType>
+	) => Promise<ElementType[]> | ElementType[];
 
 	/**
 	Checks whether the item should be emitted or not.
@@ -620,43 +689,53 @@ export type PaginationOptions<ElementType, BodyType> = {
 	stackAllItems?: boolean;
 };
 
-export type SearchParameters = Record<string, string | number | boolean | null | undefined>; // eslint-disable-line @typescript-eslint/ban-types
+export type SearchParameters = Record<
+	string,
+	string | number | boolean | null | undefined
+>; // eslint-disable-line @typescript-eslint/ban-types
 
-function validateSearchParameters(searchParameters: Record<string, unknown>): asserts searchParameters is Record<string, string | number | boolean | null | undefined> { // eslint-disable-line @typescript-eslint/ban-types
+function validateSearchParameters(
+	searchParameters: Record<string, unknown>
+): asserts searchParameters is Record<
+	string,
+	string | number | boolean | null | undefined
+> {
+	// eslint-disable-line @typescript-eslint/ban-types
 	// eslint-disable-next-line guard-for-in
 	for (const key in searchParameters) {
 		const value = searchParameters[key];
 
-		assert.any([is.string, is.number, is.boolean, is.null_, is.undefined], value);
+		assert.any(
+			[is.string, is.number, is.boolean, is.null_, is.undefined],
+			value
+		);
 	}
 }
 
 /**
 All parsing methods supported by Got.
 */
-export type ResponseType = 'json' | 'buffer' | 'text';
+export type ResponseType = "json" | "buffer" | "text";
 
 type OptionsToSkip =
-	'searchParameters' |
-	'followRedirects' |
-	'auth' |
-	'toJSON' |
-	'merge' |
-	'createNativeRequestOptions' |
-	'getRequestFunction' |
-	'getFallbackRequestFunction' |
-	'freeze';
+	| "searchParameters"
+	| "followRedirects"
+	| "auth"
+	| "toJSON"
+	| "merge"
+	| "createNativeRequestOptions"
+	| "getRequestFunction"
+	| "getFallbackRequestFunction"
+	| "freeze";
 
 export type InternalsType = Except<Options, OptionsToSkip>;
 
-export type OptionsError = NodeJS.ErrnoException & {options?: Options};
+export type OptionsError = NodeJS.ErrnoException & { options?: Options };
 
-export type OptionsInit =
-	Except<Partial<InternalsType>, 'hooks' | 'retry'>
-	& {
-		hooks?: Partial<Hooks>;
-		retry?: Partial<RetryOptions>;
-	};
+export type OptionsInit = Except<Partial<InternalsType>, "hooks" | "retry"> & {
+	hooks?: Partial<Hooks>;
+	retry?: Partial<RetryOptions>;
+};
 
 const globalCache = new Map();
 let globalDnsCache: CacheableLookup;
@@ -670,7 +749,7 @@ const getGlobalDnsCache = (): CacheableLookup => {
 	return globalDnsCache;
 };
 
-const defaultInternals: Options['_internals'] = {
+const defaultInternals: Options["_internals"] = {
 	request: undefined,
 	agent: {
 		http: undefined,
@@ -689,7 +768,7 @@ const defaultInternals: Options['_internals'] = {
 		send: undefined,
 		socket: undefined,
 	},
-	prefixUrl: '',
+	prefixUrl: "",
 	body: undefined,
 	form: undefined,
 	json: undefined,
@@ -705,18 +784,19 @@ const defaultInternals: Options['_internals'] = {
 		beforeError: [],
 		beforeRedirect: [],
 		beforeRetry: [],
+		beforeCache: [],
 		afterResponse: [],
 	},
 	followRedirect: true,
 	maxRedirects: 10,
 	cache: undefined,
 	throwHttpErrors: true,
-	username: '',
-	password: '',
+	username: "",
+	password: "",
 	http2: false,
 	allowGetBody: false,
 	headers: {
-		'user-agent': 'got (https://github.com/sindresorhus/got)',
+		"user-agent": "got (https://github.com/sindresorhus/got)",
 	},
 	methodRewriting: false,
 	dnsLookupIpVersion: undefined,
@@ -724,49 +804,32 @@ const defaultInternals: Options['_internals'] = {
 	stringifyJson: JSON.stringify,
 	retry: {
 		limit: 2,
-		methods: [
-			'GET',
-			'PUT',
-			'HEAD',
-			'DELETE',
-			'OPTIONS',
-			'TRACE',
-		],
-		statusCodes: [
-			408,
-			413,
-			429,
-			500,
-			502,
-			503,
-			504,
-			521,
-			522,
-			524,
-		],
+		methods: ["GET", "PUT", "HEAD", "DELETE", "OPTIONS", "TRACE"],
+		statusCodes: [408, 413, 429, 500, 502, 503, 504, 521, 522, 524],
 		errorCodes: [
-			'ETIMEDOUT',
-			'ECONNRESET',
-			'EADDRINUSE',
-			'ECONNREFUSED',
-			'EPIPE',
-			'ENOTFOUND',
-			'ENETUNREACH',
-			'EAI_AGAIN',
+			"ETIMEDOUT",
+			"ECONNRESET",
+			"EADDRINUSE",
+			"ECONNREFUSED",
+			"EPIPE",
+			"ENOTFOUND",
+			"ENETUNREACH",
+			"EAI_AGAIN",
 		],
 		maxRetryAfter: undefined,
-		calculateDelay: ({computedValue}) => computedValue,
+		calculateDelay: ({ computedValue }) => computedValue,
 		backoffLimit: Number.POSITIVE_INFINITY,
 		noise: 100,
 	},
 	localAddress: undefined,
-	method: 'GET',
+	method: "GET",
 	createConnection: undefined,
 	cacheOptions: {
 		shared: undefined,
 		cacheHeuristic: undefined,
 		immutableMinTimeToLive: undefined,
 		ignoreCargoCult: undefined,
+		cacheRequest: undefined,
 	},
 	https: {
 		alpnProtocols: undefined,
@@ -790,24 +853,27 @@ const defaultInternals: Options['_internals'] = {
 	encoding: undefined,
 	resolveBodyOnly: false,
 	isStream: false,
-	responseType: 'text',
+	responseType: "text",
 	url: undefined,
 	pagination: {
 		transform(response: Response) {
-			if (response.request.options.responseType === 'json') {
+			if (response.request.options.responseType === "json") {
 				return response.body;
 			}
 
 			return JSON.parse(response.body as string);
 		},
-		paginate({response}) {
+		paginate({ response }) {
 			const rawLinkHeader = response.headers.link;
-			if (typeof rawLinkHeader !== 'string' || rawLinkHeader.trim() === '') {
+			if (typeof rawLinkHeader !== "string" || rawLinkHeader.trim() === "") {
 				return false;
 			}
 
 			const parsed = parseLinkHeader(rawLinkHeader);
-			const next = parsed.find(entry => entry.parameters.rel === 'next' || entry.parameters.rel === '"next"');
+			const next = parsed.find(
+				(entry) =>
+					entry.parameters.rel === "next" || entry.parameters.rel === '"next"'
+			);
 
 			if (next) {
 				return {
@@ -831,72 +897,75 @@ const defaultInternals: Options['_internals'] = {
 };
 
 const cloneInternals = (internals: typeof defaultInternals) => {
-	const {hooks, retry} = internals;
+	const { hooks, retry } = internals;
 
 	const result: typeof defaultInternals = {
 		...internals,
-		context: {...internals.context},
-		cacheOptions: {...internals.cacheOptions},
-		https: {...internals.https},
-		agent: {...internals.agent},
-		headers: {...internals.headers},
+		context: { ...internals.context },
+		cacheOptions: { ...internals.cacheOptions },
+		https: { ...internals.https },
+		agent: { ...internals.agent },
+		headers: { ...internals.headers },
 		retry: {
 			...retry,
 			errorCodes: [...retry.errorCodes!],
 			methods: [...retry.methods!],
 			statusCodes: [...retry.statusCodes!],
 		},
-		timeout: {...internals.timeout},
+		timeout: { ...internals.timeout },
 		hooks: {
 			init: [...hooks.init],
 			beforeRequest: [...hooks.beforeRequest],
 			beforeError: [...hooks.beforeError],
 			beforeRedirect: [...hooks.beforeRedirect],
+			beforeCache: [...hooks.beforeCache],
 			beforeRetry: [...hooks.beforeRetry],
 			afterResponse: [...hooks.afterResponse],
 		},
-		searchParams: internals.searchParams ? new URLSearchParams(internals.searchParams as URLSearchParams) : undefined,
-		pagination: {...internals.pagination},
+		searchParams: internals.searchParams
+			? new URLSearchParams(internals.searchParams as URLSearchParams)
+			: undefined,
+		pagination: { ...internals.pagination },
 	};
 
 	if (result.url !== undefined) {
-		result.prefixUrl = '';
+		result.prefixUrl = "";
 	}
 
 	return result;
 };
 
 const cloneRaw = (raw: OptionsInit) => {
-	const {hooks, retry} = raw;
+	const { hooks, retry } = raw;
 
-	const result: OptionsInit = {...raw};
+	const result: OptionsInit = { ...raw };
 
 	if (is.object(raw.context)) {
-		result.context = {...raw.context};
+		result.context = { ...raw.context };
 	}
 
 	if (is.object(raw.cacheOptions)) {
-		result.cacheOptions = {...raw.cacheOptions};
+		result.cacheOptions = { ...raw.cacheOptions };
 	}
 
 	if (is.object(raw.https)) {
-		result.https = {...raw.https};
+		result.https = { ...raw.https };
 	}
 
 	if (is.object(raw.cacheOptions)) {
-		result.cacheOptions = {...result.cacheOptions};
+		result.cacheOptions = { ...result.cacheOptions };
 	}
 
 	if (is.object(raw.agent)) {
-		result.agent = {...raw.agent};
+		result.agent = { ...raw.agent };
 	}
 
 	if (is.object(raw.headers)) {
-		result.headers = {...raw.headers};
+		result.headers = { ...raw.headers };
 	}
 
 	if (is.object(retry)) {
-		result.retry = {...retry};
+		result.retry = { ...retry };
 
 		if (is.array(retry.errorCodes)) {
 			result.retry.errorCodes = [...retry.errorCodes];
@@ -912,7 +981,7 @@ const cloneRaw = (raw: OptionsInit) => {
 	}
 
 	if (is.object(raw.timeout)) {
-		result.timeout = {...raw.timeout};
+		result.timeout = { ...raw.timeout };
 	}
 
 	if (is.object(hooks)) {
@@ -936,6 +1005,10 @@ const cloneRaw = (raw: OptionsInit) => {
 			result.hooks.beforeRedirect = [...hooks.beforeRedirect];
 		}
 
+		if (is.array(hooks.beforeCache)) {
+			result.hooks.beforeCache = [...hooks.beforeCache];
+		}
+
 		if (is.array(hooks.beforeRetry)) {
 			result.hooks.beforeRetry = [...hooks.beforeRetry];
 		}
@@ -948,14 +1021,22 @@ const cloneRaw = (raw: OptionsInit) => {
 	// TODO: raw.searchParams
 
 	if (is.object(raw.pagination)) {
-		result.pagination = {...raw.pagination};
+		result.pagination = { ...raw.pagination };
 	}
 
 	return result;
 };
 
-const getHttp2TimeoutOption = (internals: typeof defaultInternals): number | undefined => {
-	const delays = [internals.timeout.socket, internals.timeout.connect, internals.timeout.lookup, internals.timeout.request, internals.timeout.secureConnect].filter(delay => typeof delay === 'number') as number[];
+const getHttp2TimeoutOption = (
+	internals: typeof defaultInternals
+): number | undefined => {
+	const delays = [
+		internals.timeout.socket,
+		internals.timeout.connect,
+		internals.timeout.lookup,
+		internals.timeout.request,
+		internals.timeout.secureConnect,
+	].filter((delay) => typeof delay === "number") as number[];
 
 	if (delays.length > 0) {
 		return Math.min(...delays);
@@ -964,7 +1045,11 @@ const getHttp2TimeoutOption = (internals: typeof defaultInternals): number | und
 	return undefined;
 };
 
-const init = (options: OptionsInit, withOptions: OptionsInit, self: Options): void => {
+const init = (
+	options: OptionsInit,
+	withOptions: OptionsInit,
+	self: Options
+): void => {
 	const initHooks = options.hooks?.init;
 	if (initHooks) {
 		for (const hook of initHooks) {
@@ -979,16 +1064,22 @@ export default class Options {
 	private _merging: boolean;
 	private readonly _init: OptionsInit[];
 
-	constructor(input?: string | URL | OptionsInit, options?: OptionsInit, defaults?: Options) {
+	constructor(
+		input?: string | URL | OptionsInit,
+		options?: OptionsInit,
+		defaults?: Options
+	) {
 		assert.any([is.string, is.urlInstance, is.object, is.undefined], input);
 		assert.any([is.object, is.undefined], options);
 		assert.any([is.object, is.undefined], defaults);
 
 		if (input instanceof Options || options instanceof Options) {
-			throw new TypeError('The defaults must be passed as the third argument');
+			throw new TypeError("The defaults must be passed as the third argument");
 		}
 
-		this._internals = cloneInternals(defaults?._internals ?? defaults ?? defaultInternals);
+		this._internals = cloneInternals(
+			defaults?._internals ?? defaults ?? defaultInternals
+		);
 		this._init = [...(defaults?._init ?? [])];
 		this._merging = false;
 		this._unixOptions = undefined;
@@ -1018,7 +1109,9 @@ export default class Options {
 						if (input === undefined) {
 							this.url = options.url;
 						} else {
-							throw new TypeError('The `url` option is mutually exclusive with the `input` argument');
+							throw new TypeError(
+								"The `url` option is mutually exclusive with the `input` argument"
+							);
 						}
 					} else if (input !== undefined) {
 						this.url = input;
@@ -1054,7 +1147,7 @@ export default class Options {
 		this._merging = true;
 
 		// Always merge `isStream` first
-		if ('isStream' in options) {
+		if ("isStream" in options) {
 			this.isStream = options.isStream!;
 		}
 
@@ -1063,12 +1156,12 @@ export default class Options {
 
 			for (const key in options) {
 				// `got.extend()` options
-				if (key === 'mutableDefaults' || key === 'handlers') {
+				if (key === "mutableDefaults" || key === "handlers") {
 					continue;
 				}
 
 				// Never merge `url`
-				if (key === 'url') {
+				if (key === "url") {
 					continue;
 				}
 
@@ -1154,7 +1247,7 @@ export default class Options {
 		if (this._merging) {
 			Object.assign(this._internals.agent, value);
 		} else {
-			this._internals.agent = {...value};
+			this._internals.agent = { ...value };
 		}
 	}
 
@@ -1223,7 +1316,7 @@ export default class Options {
 		if (this._merging) {
 			Object.assign(this._internals.timeout, value);
 		} else {
-			this._internals.timeout = {...value};
+			this._internals.timeout = { ...value };
 		}
 	}
 
@@ -1275,21 +1368,22 @@ export default class Options {
 	set prefixUrl(value: string | URL) {
 		assert.any([is.string, is.urlInstance], value);
 
-		if (value === '') {
-			this._internals.prefixUrl = '';
+		if (value === "") {
+			this._internals.prefixUrl = "";
 			return;
 		}
 
 		value = value.toString();
 
-		if (!value.endsWith('/')) {
-			value += '/';
+		if (!value.endsWith("/")) {
+			value += "/";
 		}
 
 		if (this._internals.prefixUrl && this._internals.url) {
-			const {href} = this._internals.url as URL;
+			const { href } = this._internals.url as URL;
 
-			(this._internals.url as URL).href = value + href.slice((this._internals.prefixUrl as string).length);
+			(this._internals.url as URL).href =
+				value + href.slice((this._internals.prefixUrl as string).length);
 		}
 
 		this._internals.prefixUrl = value;
@@ -1308,12 +1402,39 @@ export default class Options {
 
 	Since Got 12, the `content-length` is not automatically set when `body` is a `fs.createReadStream`.
 	*/
-	get body(): string | Buffer | Readable | Generator | AsyncGenerator | FormDataLike | undefined {
+	get body():
+		| string
+		| Buffer
+		| Readable
+		| Generator
+		| AsyncGenerator
+		| FormDataLike
+		| undefined {
 		return this._internals.body;
 	}
 
-	set body(value: string | Buffer | Readable | Generator | AsyncGenerator | FormDataLike | undefined) {
-		assert.any([is.string, is.buffer, is.nodeStream, is.generator, is.asyncGenerator, isFormData, is.undefined], value);
+	set body(
+		value:
+			| string
+			| Buffer
+			| Readable
+			| Generator
+			| AsyncGenerator
+			| FormDataLike
+			| undefined
+	) {
+		assert.any(
+			[
+				is.string,
+				is.buffer,
+				is.nodeStream,
+				is.generator,
+				is.asyncGenerator,
+				isFormData,
+				is.undefined,
+			],
+			value
+		);
 
 		if (is.nodeStream(value)) {
 			assert.truthy(value.readable);
@@ -1401,33 +1522,35 @@ export default class Options {
 			return;
 		}
 
-		if (is.string(value) && value.startsWith('/')) {
-			throw new Error('`url` must not start with a slash');
+		if (is.string(value) && value.startsWith("/")) {
+			throw new Error("`url` must not start with a slash");
 		}
 
 		const urlString = `${this.prefixUrl as string}${value.toString()}`;
 		const url = new URL(urlString);
 		this._internals.url = url;
 
-		if (url.protocol === 'unix:') {
+		if (url.protocol === "unix:") {
 			url.href = `http://unix${url.pathname}${url.search}`;
 		}
 
-		if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-			const error: NodeJS.ErrnoException = new Error(`Unsupported protocol: ${url.protocol}`);
-			error.code = 'ERR_UNSUPPORTED_PROTOCOL';
+		if (url.protocol !== "http:" && url.protocol !== "https:") {
+			const error: NodeJS.ErrnoException = new Error(
+				`Unsupported protocol: ${url.protocol}`
+			);
+			error.code = "ERR_UNSUPPORTED_PROTOCOL";
 
 			throw error;
 		}
 
 		if (this._internals.username) {
 			url.username = this._internals.username;
-			this._internals.username = '';
+			this._internals.username = "";
 		}
 
 		if (this._internals.password) {
 			url.password = this._internals.password;
-			this._internals.password = '';
+			this._internals.password = "";
 		}
 
 		if (this._internals.searchParams) {
@@ -1435,20 +1558,24 @@ export default class Options {
 			this._internals.searchParams = undefined;
 		}
 
-		if (url.hostname === 'unix') {
+		if (url.hostname === "unix") {
 			if (!this._internals.enableUnixSockets) {
-				throw new Error('Using UNIX domain sockets but option `enableUnixSockets` is not enabled');
+				throw new Error(
+					"Using UNIX domain sockets but option `enableUnixSockets` is not enabled"
+				);
 			}
 
-			const matches = /(?<socketPath>.+?):(?<path>.+)/.exec(`${url.pathname}${url.search}`);
+			const matches = /(?<socketPath>.+?):(?<path>.+)/.exec(
+				`${url.pathname}${url.search}`
+			);
 
 			if (matches?.groups) {
-				const {socketPath, path} = matches.groups;
+				const { socketPath, path } = matches.groups;
 
 				this._unixOptions = {
 					socketPath,
 					path,
-					host: '',
+					host: "",
 				};
 			} else {
 				this._unixOptions = undefined;
@@ -1477,7 +1604,7 @@ export default class Options {
 			return;
 		}
 
-		let {setCookie, getCookieString} = value;
+		let { setCookie, getCookieString } = value;
 
 		assert.function_(setCookie);
 		assert.function_(getCookieString);
@@ -1489,7 +1616,7 @@ export default class Options {
 
 			this._internals.cookieJar = {
 				setCookie,
-				getCookieString: getCookieString as PromiseCookieJar['getCookieString'],
+				getCookieString: getCookieString as PromiseCookieJar["getCookieString"],
 			};
 		} else {
 			this._internals.cookieJar = value;
@@ -1570,7 +1697,9 @@ export default class Options {
 		return this._internals.searchParams;
 	}
 
-	set searchParams(value: string | SearchParameters | URLSearchParams | undefined) {
+	set searchParams(
+		value: string | SearchParameters | URLSearchParams | undefined
+	) {
 		assert.any([is.string, is.object, is.undefined], value);
 
 		const url = this._internals.url as URL;
@@ -1579,7 +1708,7 @@ export default class Options {
 			this._internals.searchParams = undefined;
 
 			if (url) {
-				url.search = '';
+				url.search = "";
 			}
 
 			return;
@@ -1602,7 +1731,7 @@ export default class Options {
 				const entry = value[key];
 
 				if (entry === null) {
-					updated.append(key, '');
+					updated.append(key, "");
 				} else if (entry === undefined) {
 					searchParameters.delete(key);
 				} else {
@@ -1628,18 +1757,22 @@ export default class Options {
 	}
 
 	get searchParameters() {
-		throw new Error('The `searchParameters` option does not exist. Use `searchParams` instead.');
+		throw new Error(
+			"The `searchParameters` option does not exist. Use `searchParams` instead."
+		);
 	}
 
 	set searchParameters(_value: unknown) {
-		throw new Error('The `searchParameters` option does not exist. Use `searchParams` instead.');
+		throw new Error(
+			"The `searchParameters` option does not exist. Use `searchParams` instead."
+		);
 	}
 
-	get dnsLookup(): CacheableLookup['lookup'] | undefined {
+	get dnsLookup(): CacheableLookup["lookup"] | undefined {
 		return this._internals.dnsLookup;
 	}
 
-	set dnsLookup(value: CacheableLookup['lookup'] | undefined) {
+	set dnsLookup(value: CacheableLookup["lookup"] | undefined) {
 		assert.any([is.function_, is.undefined], value);
 
 		this._internals.dnsLookup = value;
@@ -1712,7 +1845,7 @@ export default class Options {
 		if (this._merging) {
 			Object.assign(this._internals.context, value);
 		} else {
-			this._internals.context = {...value};
+			this._internals.context = { ...value };
 		}
 	}
 
@@ -1779,11 +1912,15 @@ export default class Options {
 	}
 
 	get followRedirects() {
-		throw new TypeError('The `followRedirects` option does not exist. Use `followRedirect` instead.');
+		throw new TypeError(
+			"The `followRedirects` option does not exist. Use `followRedirect` instead."
+		);
 	}
 
 	set followRedirects(_value: unknown) {
-		throw new TypeError('The `followRedirects` option does not exist. Use `followRedirect` instead.');
+		throw new TypeError(
+			"The `followRedirects` option does not exist. Use `followRedirect` instead."
+		);
 	}
 
 	/**
@@ -2110,7 +2247,9 @@ export default class Options {
 		assert.any([is.number, is.undefined], value.noise);
 
 		if (value.noise && Math.abs(value.noise) > 100) {
-			throw new Error(`The maximum acceptable retry noise is +/- 100ms, got ${value.noise}`);
+			throw new Error(
+				`The maximum acceptable retry noise is +/- 100ms, got ${value.noise}`
+			);
 		}
 
 		for (const key in value) {
@@ -2122,12 +2261,16 @@ export default class Options {
 		if (this._merging) {
 			Object.assign(this._internals.retry, value);
 		} else {
-			this._internals.retry = {...value};
+			this._internals.retry = { ...value };
 		}
 
-		const {retry} = this._internals;
+		const { retry } = this._internals;
 
-		retry.methods = [...new Set(retry.methods!.map(method => method.toUpperCase() as Method))];
+		retry.methods = [
+			...new Set(
+				retry.methods!.map((method) => method.toUpperCase() as Method)
+			),
+		];
 		retry.statusCodes = [...new Set(retry.statusCodes)];
 		retry.errorCodes = [...new Set(retry.errorCodes)];
 	}
@@ -2198,7 +2341,7 @@ export default class Options {
 		if (this._merging) {
 			Object.assign(this._internals.cacheOptions, value);
 		} else {
-			this._internals.cacheOptions = {...value};
+			this._internals.cacheOptions = { ...value };
 		}
 	}
 
@@ -2214,9 +2357,15 @@ export default class Options {
 
 		assert.any([is.boolean, is.undefined], value.rejectUnauthorized);
 		assert.any([is.function_, is.undefined], value.checkServerIdentity);
-		assert.any([is.string, is.object, is.array, is.undefined], value.certificateAuthority);
+		assert.any(
+			[is.string, is.object, is.array, is.undefined],
+			value.certificateAuthority
+		);
 		assert.any([is.string, is.object, is.array, is.undefined], value.key);
-		assert.any([is.string, is.object, is.array, is.undefined], value.certificate);
+		assert.any(
+			[is.string, is.object, is.array, is.undefined],
+			value.certificate
+		);
 		assert.any([is.string, is.undefined], value.passphrase);
 		assert.any([is.string, is.buffer, is.array, is.undefined], value.pfx);
 		assert.any([is.array, is.undefined], value.alpnProtocols);
@@ -2228,7 +2377,10 @@ export default class Options {
 		assert.any([is.boolean, is.undefined], value.honorCipherOrder);
 		assert.any([is.number, is.undefined], value.tlsSessionLifetime);
 		assert.any([is.string, is.undefined], value.ecdhCurve);
-		assert.any([is.string, is.buffer, is.array, is.undefined], value.certificateRevocationLists);
+		assert.any(
+			[is.string, is.buffer, is.array, is.undefined],
+			value.certificateRevocationLists
+		);
 
 		for (const key in value) {
 			if (!(key in this._internals.https)) {
@@ -2239,7 +2391,7 @@ export default class Options {
 		if (this._merging) {
 			Object.assign(this._internals.https, value);
 		} else {
-			this._internals.https = {...value};
+			this._internals.https = { ...value };
 		}
 	}
 
@@ -2259,7 +2411,9 @@ export default class Options {
 
 	set encoding(value: BufferEncoding | undefined) {
 		if (value === null) {
-			throw new TypeError('To get a Buffer, set `options.responseType` to `buffer` instead');
+			throw new TypeError(
+				"To get a Buffer, set `options.responseType` to `buffer` instead"
+			);
 		}
 
 		assert.any([is.string, is.undefined], value);
@@ -2334,11 +2488,11 @@ export default class Options {
 
 	set responseType(value: ResponseType) {
 		if (value === undefined) {
-			this._internals.responseType = 'text';
+			this._internals.responseType = "text";
 			return;
 		}
 
-		if (value !== 'text' && value !== 'buffer' && value !== 'json') {
+		if (value !== "text" && value !== "buffer" && value !== "json") {
 			throw new Error(`Invalid \`responseType\` option: ${value as string}`);
 		}
 
@@ -2360,11 +2514,15 @@ export default class Options {
 	}
 
 	get auth() {
-		throw new Error('Parameter `auth` is deprecated. Use `username` / `password` instead.');
+		throw new Error(
+			"Parameter `auth` is deprecated. Use `username` / `password` instead."
+		);
 	}
 
 	set auth(_value: unknown) {
-		throw new Error('Parameter `auth` is deprecated. Use `username` / `password` instead.');
+		throw new Error(
+			"Parameter `auth` is deprecated. Use `username` / `password` instead."
+		);
 	}
 
 	get setHost() {
@@ -2399,10 +2557,13 @@ export default class Options {
 
 	// eslint-disable-next-line @typescript-eslint/naming-convention
 	toJSON() {
-		return {...this._internals};
+		return { ...this._internals };
 	}
 
-	[Symbol.for('nodejs.util.inspect.custom')](_depth: number, options: InspectOptions) {
+	[Symbol.for("nodejs.util.inspect.custom")](
+		_depth: number,
+		options: InspectOptions
+	) {
 		return inspect(this._internals, options);
 	}
 
@@ -2411,17 +2572,17 @@ export default class Options {
 		const url = internals.url as URL;
 
 		let agent;
-		if (url.protocol === 'https:') {
+		if (url.protocol === "https:") {
 			agent = internals.http2 ? internals.agent : internals.agent.https;
 		} else {
 			agent = internals.agent.http;
 		}
 
-		const {https} = internals;
-		let {pfx} = https;
+		const { https } = internals;
+		let { pfx } = https;
 
 		if (is.array(pfx) && is.plainObject(pfx[0])) {
-			pfx = (pfx as PfxObject[]).map(object => ({
+			pfx = (pfx as PfxObject[]).map((object) => ({
 				buf: object.buffer,
 				passphrase: object.passphrase,
 			})) as any;
@@ -2452,7 +2613,9 @@ export default class Options {
 			crl: https.certificateRevocationLists,
 
 			// HTTP options
-			lookup: internals.dnsLookup ?? (internals.dnsCache as CacheableLookup | undefined)?.lookup,
+			lookup:
+				internals.dnsLookup ??
+				(internals.dnsCache as CacheableLookup | undefined)?.lookup,
 			family: internals.dnsLookupIpVersion,
 			agent,
 			setHost: internals.setHost,
@@ -2469,8 +2632,8 @@ export default class Options {
 	}
 
 	getRequestFunction() {
-		const url = this._internals.url as (URL | undefined);
-		const {request} = this._internals;
+		const url = this._internals.url as URL | undefined;
+		const { request } = this._internals;
 
 		if (!request && url) {
 			return this.getFallbackRequestFunction();
@@ -2480,17 +2643,19 @@ export default class Options {
 	}
 
 	getFallbackRequestFunction() {
-		const url = this._internals.url as (URL | undefined);
+		const url = this._internals.url as URL | undefined;
 
 		if (!url) {
 			return;
 		}
 
-		if (url.protocol === 'https:') {
+		if (url.protocol === "https:") {
 			if (this._internals.http2) {
 				if (major < 15 || (major === 15 && minor < 10)) {
-					const error = new Error('To use the `http2` option, install Node.js 15.10.0 or above');
-					(error as NodeJS.ErrnoException).code = 'EUNSUPPORTED';
+					const error = new Error(
+						"To use the `http2` option, install Node.js 15.10.0 or above"
+					);
+					(error as NodeJS.ErrnoException).code = "EUNSUPPORTED";
 
 					throw error;
 				}
@@ -2513,6 +2678,7 @@ export default class Options {
 		Object.freeze(options.hooks.beforeError);
 		Object.freeze(options.hooks.beforeRedirect);
 		Object.freeze(options.hooks.beforeRequest);
+		Object.freeze(options.hooks.beforeCache);
 		Object.freeze(options.hooks.beforeRetry);
 		Object.freeze(options.hooks.init);
 		Object.freeze(options.https);
